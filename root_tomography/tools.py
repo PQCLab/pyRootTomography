@@ -142,8 +142,8 @@ def simulate(dm, proto, nshots=1, asymp=False):
 
 
 # Protocol generator
-def protocol(ptype, dim=None):
-    if ptype == "mub":
+def protocol(ptype: str, dim=None):
+    if ptype.lower() == "mub":
         if type(dim) is not list:
             dim = [dim]
         bases = []
