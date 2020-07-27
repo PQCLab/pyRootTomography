@@ -2,7 +2,13 @@
 
 Python library for the discrete variables quantum state tomography using root approach. The library contains a set of routines for quantum state reconstruction by the complementary measurements results and estimation of statistical adequacy.
 
-## <a name="format">Data format</a>
+## Installation
+```
+pip install root-tomography
+```
+
+
+## Data format
 
 Measurement protocol is defined by a set of complementary measurement experiments over density matrix ![rho](https://latex.codecogs.com/svg.latex?%5Crho). Every experiment is repeated many times and has several possible measurement outcomes. The probability to get ![k](https://latex.codecogs.com/svg.latex?k)-th outcome is determined by the measurement operator ![M_k](https://latex.codecogs.com/svg.latex?M_k) as ![p_k=trace(rho*M_k)](https://latex.codecogs.com/svg.latex?p_k%3D%5Ctext%7BTr%7D%28%5Crho%20M_k%29). The set of measurement operators and the number of experiments repetitions define the **_measurement protocol_**. The number of observations for each outcome define the **_measurement results_**. The following code describe the required data format.
 ```
@@ -23,13 +29,14 @@ nshots = tools.nshots_devide(n, len(proto), "equal")
 One can simulate the measurements of some density matrix.
 ```
 dm_true = tools.gen_state("haar_dm", 2, rank=1)  # Generate Haar-random single-qubit pure state density matrix
-clicks = tools.simulate(dm, proto, nshots)  # Simulate measurements
+clicks = tools.simulate(dm_true, proto, nshots)  # Simulate measurements
 ```
 
-## <a name="qsr">Quantum state reconstruction</a>
+## Quantum state reconstruction
 Reconstruct density matrix and estimate fidelity comparing to true state.
 ```
-dm = dm_reconstruct(clicks, proto, nshots, display=True)
+from root_tomography.reconstruction import dm_reconstruct
+dm, _ = dm_reconstruct(clicks, proto, nshots, display=True)
 print("Fidelity: {}".format(tools.fidelity(dm, dm_true)))
 ```
 Output:
@@ -46,7 +53,7 @@ dm_reconstruct(clicks, proto)  # same as nshots[j] = sum(clicks[j])
 ```
 Instead of automatic rank estimation one can pick a specific rank of the quantum state model. For example, in some experiments it could be likely to have a pure (rank 1) state.
 ```
-dm = dm_reconstruct(clicks, proto, nshots, rank=1, display=True)
+dm, _ = dm_reconstruct(clicks, proto, nshots, rank=1, display=True)
 print("Fidelity: {}".format(tools.fidelity(dm, dm_true)))
 ```
 Output:
@@ -56,7 +63,7 @@ Fidelity: 0.9997600124722302
 ```
 In general, you can specify any rank from 1 to the Hilbert space dimension.
 
-## <a name="algorithms">Algorithms</a>
+## Algorithms
 
 Consider a quantum state in the Hilbert space ![H](https://latex.codecogs.com/svg.latex?%5Cmathcal%7BH%7D) described by the density matrix ![rho](https://latex.codecogs.com/svg.latex?%5Crho).
 According to the root approach the rank-![r](https://latex.codecogs.com/svg.latex?r) quantum state parametrization is defined by the complex matrix ![c](https://latex.codecogs.com/svg.latex?c) of size ![sxr](https://latex.codecogs.com/svg.latex?s%20%5Ctimes%20r) (![s=dimH](https://latex.codecogs.com/svg.latex?s%3D%5Ctext%7Bdim%7D%5Cmathcal%7BH%7D)) such that ![rho=cc+](https://latex.codecogs.com/svg.latex?%5Crho%3Dcc%5E%5Cdagger). To get the quantum state maximum likelihood estimation one must solve the following quasi-linear equation (_likelihood equation_) [[1]](#ref1):
@@ -71,6 +78,6 @@ The search of the likelihood equation solution is performed by the fixed-point i
 
 Here ![alpha](https://latex.codecogs.com/svg.latex?%5Calpha) is the regularization parameter. We use Moore-Penrose pseudo-inversion to get ![c_0](https://latex.codecogs.com/svg.latex?c_0).
 
-## <a name="references">References</a>
+## References
 
 <a name="ref1">[1]</a> Bogdanov Yu. I. Unified statistical method for reconstructing quantum states by purification // _JETP_ **108(6)** 928-935 (2009); doi: 10.1134/S106377610906003X
