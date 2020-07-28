@@ -5,8 +5,9 @@ with open("README.md", "r") as fh:
 
 setup(
     name="root-tomography",
-    version="0.1",
+    version="0.2",
     packages=["root_tomography"],
+    package_data={"root_tomography": ["mubs.pickle"]},
     url="https://github.com/PQCLab/pyRootTomography",
     author="Boris Bantysh",
     author_email="bbantysh60000@gmail.com",
