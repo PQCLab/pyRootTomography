@@ -86,38 +86,3 @@ def lossfun(entity: Union[State, Process], proto, *args, **kwargs):
     nshots = nshots_divide(1, len(proto), "total")
     df = sum(bound(entity, proto, nshots, *args, **kwargs))
     return df * sum(nshots)
-
-
-
-if __name__ == "__main__":
-    dim = 2
-    rank = 1
-    state = State.random(dim, rank)
-    nshots = 1000
-
-    from root_tomography.experiment import proto_measurement
-    proto = proto_measurement("mub", dim=dim)
-
-    h = infomatrix(state, proto, nshots)
-    print(h)
-    print(np.linalg.eigvalsh(h))
-
-    d = bound(state, proto, nshots)
-    print(d)
-    print(sum(d))
-
-    p, x = gchi2pdf(d)
-    pmf = p * (x[1] - x[0])
-    print(sum(x * pmf))
-
-    print(2*sum(d**2))
-    print(sum((x - sum(d))**2 * pmf))
-
-    import matplotlib.pyplot as plt
-    plt.figure()
-    plt.plot(x, p)
-    plt.show()
-    # print(len(p))
-
-
-
