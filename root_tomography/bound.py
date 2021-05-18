@@ -7,17 +7,13 @@ from root_tomography.experiment import Experiment, nshots_divide
 from root_tomography.tools import extend
 
 
-def infomatrix(entity: Union[State, Process], proto, nshots, rank: Union[str, int] = "entity", return_all=False):
+def infomatrix(entity: Union[State, Process], ex: Experiment, rank: Union[str, int] = "entity"):
     dm = entity.dm
-    dim = dm.shape[0]
+    dm_norm = np.trace(dm)
     if rank == "entity":
-        rank = entity.rank
         psi = entity.root
     else:
         psi = State.purify(dm, rank)
-
-    ex = Experiment(dim, entity.__class__, "poiss")
-    ex.set_data(proto, nshots)
 
     # Find close state with no zeros probabilities
     prob = []
@@ -31,7 +27,7 @@ def infomatrix(entity: Union[State, Process], proto, nshots, rank: Union[str, in
             warn("Failed to find non-singular state")
         else:
             psi += (np.random.normal(size=psi.shape) + 1j * np.random.normal(size=psi.shape)) * np.sqrt(p_tol)
-            psi = psi / np.sqrt(np.trace(psi.conj().T @ psi))
+            psi = psi / np.sqrt(np.trace(psi.conj().T @ psi) / dm_norm)
 
     # Calculate Fisher information matrix
     h = 0
@@ -41,23 +37,25 @@ def infomatrix(entity: Union[State, Process], proto, nshots, rank: Union[str, in
     for elem, n, p in zip(operators, nshots, prob):
         a = np.reshape(elem @ psi, (-1,), order="F")
         a = np.concatenate((np.real(a), np.imag(a)))
-        h = h + n / p * np.outer(a, a)
+        h = h + ex.stat().fisher_information(n, p) * np.outer(a, a)
     h = 4 * h
+    return h
 
-    if return_all:
-        return h, dim, rank, psi
+
+def bound(entity: Union[State, Process], ex: Experiment, rank: Union[str, int] = "entity"):
+    dm = entity.dm
+    if rank == "entity":
+        rank = entity.rank
+        psi = entity.root
     else:
-        return h
-
-
-def bound(entity: Union[State, Process], proto, nshots, rank: Union[str, int] = "entity", trace_preserving: bool = True):
-    h, dim, rank, psi = infomatrix(entity, proto, nshots, rank=rank, return_all=True)
+        psi = State.purify(dm, rank)
+    h = infomatrix(entity, ex, rank=rank)
 
     constraints = []
     sh, uh = np.linalg.eigh(h)
 
     # Normalization constraints
-    if type(entity) is State or (type(entity) is Process and not trace_preserving):
+    if type(entity) is State:
         psi_vec = np.reshape(psi, (-1,), order="F")
         constraints.append(np.concatenate((np.real(psi_vec), np.imag(psi_vec))))
     elif type(entity) is Process:
@@ -82,7 +80,8 @@ def bound(entity: Union[State, Process], proto, nshots, rank: Union[str, int] = 
     return fid_d
 
 
-def lossfun(entity: Union[State, Process], proto, *args, **kwargs):
-    nshots = nshots_divide(1, len(proto), "total")
-    df = sum(bound(entity, proto, nshots, *args, **kwargs))
-    return df * sum(nshots)
+def lossfun(entity: Union[State, Process], ex: Experiment, *args, **kwargs):
+    if ex.nshots is None:
+        ex.set_data(nshots=nshots_divide(1, len(ex.proto), "total"))
+    df = sum(bound(entity, ex, *args, **kwargs))
+    return df * sum(ex.nshots)

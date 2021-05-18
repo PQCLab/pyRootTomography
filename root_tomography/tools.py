@@ -39,8 +39,8 @@ def base2povm(base):
     return povm
 
 
-def pinv(proto, probs, rank=None):
-    bmat = meas_matrix(proto)
+def pinv(x, probs, rank=None):
+    bmat = meas_matrix(x) if type(x) is list else x
     dim = int(np.sqrt(bmat.shape[1]))
     dm = np.reshape(np.linalg.lstsq(bmat, probs, rcond=None)[0], (dim, dim), order="F")
     sq = State.purify(dm, rank)

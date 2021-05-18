@@ -1,7 +1,9 @@
 import numpy as np
 from cmath import exp, pi
 from itertools import product
-from root_tomography.entity import State, Process, part_trace
+from typing import Union
+import root_tomography.meas_statistics as stat
+from root_tomography.entity import State, Process, part_trace, rand_unitary
 from root_tomography.tools import kron3d, extend, base2povm, meas_matrix
 rng = np.random.default_rng()
 
@@ -9,7 +11,7 @@ rng = np.random.default_rng()
 class Experiment:
     dim = None
     entity = None
-    stat_type = None
+    stat_pkg = "auto"
     proto = None
     nshots = None
     clicks = None
@@ -17,16 +19,19 @@ class Experiment:
     _vec_nshots = None
     _vec_clicks = None
 
-    def __init__(self, dim: int, entity, stat_type="auto"):
+    def __init__(self, dim: int, entity, stats: Union[str, stat.Statistics] = "auto"):
         self.dim = dim
         self.entity = entity
         if self.entity.__name__ not in ["State", "Process"]:
             raise ValueError(
                 "Unknown entity: '{}'\n Only State, Process are available".format(entity.__name__))
-        self.stat_type = stat_type.lower()
-        if self.stat_type not in ["poly", "poiss", "asymp", "auto"]:
-            raise ValueError(
-                "Unknown statistics type: '{}'\n Only 'poly', 'poiss', 'asymp', 'auto' are available".format(stat_type))
+        if type(stats) is str:
+            stats = stats.lower()
+            st_allowed = list(stat.BUILD_IN.keys())
+            st_allowed.append("auto")
+            if stats not in st_allowed:
+                raise ValueError("Unknown statistics type: {}\n Available types: {}".format(stats, ", ".join(st_allowed)))
+        self.stat_pkg = stats
 
     def set_data(self, proto=None, nshots=None, clicks=None):
         if proto is not None:
@@ -37,18 +42,6 @@ class Experiment:
                 proto = [proto[j, :, :] for j in range(proto.shape[0])]
             proto = [extend(elem, 3) for elem in proto]
 
-            if self.stat_type == "auto":
-                imat = np.eye(self.dim)
-                if all([elem.shape[0] == 1 for elem in proto]):
-                    self.stat_type = "poiss"
-                elif self.entity is State and \
-                        all([np.allclose(np.sum(elem, axis=0), imat) for elem in proto]):
-                    self.stat_type = "poly"
-                elif self.entity is Process and \
-                        all([np.allclose(part_trace(np.sum(elem, axis=0), [self.dim, self.dim], 0), imat) for elem in proto]):
-                    self.stat_type = "poly"
-                else:
-                    raise ValueError("Failed to determine statistics type. Please, specify stat_type manually.")
             self.proto = proto
             self._vec_proto = None
 
@@ -59,9 +52,6 @@ class Experiment:
             self._vec_clicks = None
 
         if nshots is not None:
-            if self.stat_type == "auto" and np.any(nshots is np.inf):
-                nshots = [1] * len(nshots)
-                self.stat_type = "asymp"
             if type(nshots) is np.ndarray:
                 nshots = list(nshots)
             self.nshots = nshots
@@ -93,6 +83,28 @@ class Experiment:
             self._vec_clicks = np.concatenate(tuple(self.clicks))
         return self._vec_clicks
 
+    def stat(self) -> stat.Statistics:
+        if type(self.stat_pkg) is str:
+            if self.stat_pkg == "auto":
+                if any(np.isinf(self.nshots)):
+                    self.set_data(nshots=np.ones(self.nshots.shape))
+                    self.stat_pkg = "asymptotic"
+                else:
+                    imat = np.eye(self.dim)
+                    if all([elem.shape[0] == 1 for elem in self.proto]):
+                        self.stat_pkg = "binomial"
+                    elif self.entity is State and \
+                            all([np.allclose(np.sum(elem, axis=0), imat) for elem in self.proto]):
+                        self.stat_pkg = "polynomial"
+                    elif self.entity is Process and \
+                            all([np.allclose(part_trace(np.sum(elem, axis=0), [self.dim, self.dim], 0), imat) for elem in
+                                 self.proto]):
+                        self.stat_pkg = "polynomial"
+                    else:
+                        raise ValueError("Failed to determine statistics type. Please, specify stat_type manually.")
+            self.stat_pkg = stat.BUILD_IN[self.stat_pkg]
+        return self.stat_pkg
+
     def get_probs_dm(self, dm: np.ndarray, tol=0.0) -> np.ndarray:
         p = np.abs(self.vec_proto @ dm.reshape((-1,), order="F"))
         p[p < tol] = tol
@@ -101,81 +113,65 @@ class Experiment:
     def get_probs_sq(self, sq: np.ndarray, tol=0.0) -> np.ndarray:
         return self.get_probs_dm(sq @ sq.conj().T, tol)
 
+    def nkp(self, dm=None):
+        n = self.vec_nshots
+        k = self.vec_clicks
+        if dm is None:
+            return n, k
+        else:
+            return n, k, self.get_probs_dm(dm, 1e-15)
+
     # Sampling
-    def simulate(self, dm: np.ndarray) -> list:
-        clicks = []
+    def simulate(self, dm: np.ndarray):
+        clk = []
         for elem, n in zip(self.proto, self.nshots):
             probs = np.abs(meas_matrix(elem) @ dm.reshape((-1,), order="F"))
-            clicks.append(self.sample(probs, n))
-        return clicks
-
-    def sample(self, p: np.ndarray, n: int) -> np.ndarray:
-        if self.stat_type == "poly":
-            if abs(sum(p) - 1) > 1e-8:
-                raise ValueError("For simulating polynomial statistics probabilities in each measurement should sum to unity")
-            p = p / sum(p)
-            if len(p) == 2:
-                k = np.array([0, 0])
-                k[0] = rng.binomial(n, p[0])
-                k[1] = n - k[0]
-            else:
-                k = rng.multinomial(n, p)
-        elif self.stat_type == "poiss":
-            k = rng.poisson(n * p)
-        elif self.stat_type == "asymp":
-            k = n * p
-        else:
-            raise ValueError("Invalid statistics type")
-        return k
+            clk.append(self.stat().sample(n, probs))
+        self._vec_clicks = None
+        self.set_data(clicks=clk)
 
     # Likelihood
-    def get_logL_dm(self, dm: np.ndarray):
-        p = self.get_probs_dm(dm, 1e-15)
-        k = self.vec_clicks
-        if self.stat_type == "poly":
-            return sum(k * np.log(p))
-        elif self.stat_type == "poiss":
-            lam = self.vec_nshots * p
-            return k * np.log(lam) - lam
-        else:
-            raise ValueError("Invalid statistics type")
+    def logL_dm(self, dm: np.ndarray) -> float:
+        n, k, p = self.nkp(dm)
+        return self.stat().logL(n, k, p)
 
-    def get_logL_sq(self, sq: np.ndarray):
-        return self.get_logL_dm(sq @ sq.conj().T)
+    def logL_sq(self, sq: np.ndarray) -> float:
+        return self.logL_dm(sq @ sq.conj().T)
 
-    def get_dlogL_sq(self, sq: np.ndarray):
-        p = self.get_probs_sq(sq, 1e-12)
-        k = self.vec_clicks
+    def dlogL_sq(self, sq: np.ndarray) -> np.ndarray:
+        n, k, p = self.nkp(sq @ sq.conj().T)
+        b = self.stat().dlogL(n, k, p)
         bmat = self.vec_proto
-        a = k / p
-        if self.stat_type == "poly":
-            jmat = np.reshape(bmat.conj().T @ a, (sq.shape[0], -1), order="F")
-            return 2 * jmat @ sq
-        elif self.stat_type == "poiss":
-            jmat = np.reshape(bmat.conj().T @ (a - self.vec_nshots), (sq.shape[0], -1), order="F")
-            return 2 * jmat @ sq
-        else:
-            raise ValueError("Invalid statistics type")
+        return 2 * np.reshape(bmat.conj().T @ b, (self.dim, -1), order="F") @ sq
+
+    def logL_eq_mu(self) -> float:
+        n, k = self.nkp()
+        return self.stat().logL_mu(n, k)
+
+    def logL_eq_jmat_dm(self, dm) -> np.ndarray:
+        n, k, p = self.nkp(dm)
+        b, b0 = self.stat().logL_jmat(n, k, p)
+        bmat = self.vec_proto
+        jmat = np.reshape(bmat.conj().T @ b, (self.dim, self.dim), order="F")
+        if b0 != 0:
+            jmat += b0 * np.eye(self.dim)
+        return jmat
 
     # Chi-squared
-    def get_chi2_dm(self, dm: np.ndarray):
-        n_expected = self.get_probs_dm(dm) * self.vec_nshots
-        n_observed = self.vec_clicks
-        return sum((n_expected-n_observed) ** 2 / n_expected)
+    def chi2_dm(self, dm: np.ndarray):
+        n, k, p = self.nkp(dm)
+        return self.stat().chi2(n, k, p)
 
-    def get_df(self, rank):
-        df = len(self.vec_clicks)
-        if self.stat_type == "poly":
-            df -= len(self.clicks)
+    def deg_f_rank(self, rank):
+        nu = self.stat().deg_f(self.clicks)
         if self.entity is State:
-            nu = (2 * self.dim - rank) * rank - 1
+            nu_dm = (2 * self.dim - rank) * rank - 1
         elif self.entity is Process:
             dim2 = self.dim ** 2
-            nu = (2 * dim2 - rank) * rank - dim2
+            nu_dm = (2 * dim2 - rank) * rank - dim2
         else:
             raise ValueError("Invalid entity")
-        df -= nu
-        return df
+        return nu - nu_dm
 
 
 def nshots_divide(n, m, method="total_int"):
@@ -195,27 +191,26 @@ def nshots_divide(n, m, method="total_int"):
     return list(nshots)
 
 
-def proto_measurement(ptype: str, dim=None, modifier="", nsub=1):
+def proto_measurement(ptype: str, dim=None, modifier="", num=None, nsub=1):
     ptype = ptype.lower()
     modifier = modifier.lower()
     if ptype == "mub":
-        bases = get_mubs(dim)
-        proto = [base2povm(base) for base in bases]
-        if modifier == "operator":
-            proto = np.concatenate(tuple(proto), axis=0)
+        proto = [base2povm(base) for base in get_mubs(dim)]
     elif ptype == "tetra":
-        bases = get_tetra()
-        proto = [base2povm(base) for base in bases]
-        if modifier == "operator":
-            proto = np.concatenate(tuple(proto), axis=0)
-        elif modifier == "operator+":
-            proto = [extend(elem[0, :, :], 3) for elem in proto]
-            proto = np.concatenate(tuple(proto), axis=0)
-        elif modifier == "operator-":
-            proto = [extend(elem[1, :, :], 3) for elem in proto]
-            proto = np.concatenate(tuple(proto), axis=0)
+        proto = [base2povm(base) for base in get_tetra()]
+    elif ptype == "random_bases":
+        proto = [base2povm(rand_unitary(dim)) for _ in range(num)]
+    elif ptype == "random_projectors":
+        proto = [extend(State.random(dim, 1).dm, 3) for _ in range(num)]
     else:
         raise ValueError("Unknown measurement protocol type '{}'".format(ptype))
+
+    if modifier[:8] == "operator":
+        if modifier == "operator":
+            proto = np.concatenate(tuple(proto), axis=0)
+        else:
+            idx = int(modifier[8:])
+            proto = [extend(elem[idx, :, :], 3) for elem in proto]
 
     if type(proto) is not list:
         proto = [proto[j, :, :] for j in range(proto.shape[0])]
