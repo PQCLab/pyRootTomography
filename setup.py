@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="root-tomography",
-    version="0.3",
+    version="0.5",
     packages=["root_tomography"],
     url="https://github.com/PQCLab/pyRootTomography",
     author="Boris Bantysh",
@@ -15,12 +15,12 @@ setup(
     long_description_content_type="text/markdown",
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GPL-3.0 License",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.6",
+    python_requires=">=3.7",
     install_requires=[
-        "numpy",
-        "scipy"
+        "numpy>=1.20.2",
+        "scipy>=1.6.2"
     ],
 )
