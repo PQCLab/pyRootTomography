@@ -47,7 +47,7 @@ class Experiment:
 
         if clicks is not None:
             if type(clicks) is not list:
-                clicks = [clicks[:, j] for j in range(clicks.shape[1])]
+                clicks = [clicks[j] for j in range(clicks.shape[0])]
             self.clicks = clicks
             self._vec_clicks = None
 
