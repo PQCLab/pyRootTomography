@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="root-tomography",
-    version="0.6",
+    version="0.7",
     packages=["root_tomography"],
     url="https://github.com/PQCLab/pyRootTomography",
     author="Boris Bantysh",
